@@ -191,7 +191,7 @@ export const workers = {
 
 
 export const bClone = (buf: Buffer) => {
-  const clone = Buffer.allocUnsafe(buf.length);
+  const clone = Buffer.allocUnsafeSlow(buf.length);
   clone.set(buf);
   return clone;
 }
