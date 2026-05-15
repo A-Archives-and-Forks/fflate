@@ -1182,6 +1182,7 @@ const b2 = (d: Uint8Array, b: number) => d[b] | (d[b + 1] << 8);
 // read 4 bytes
 const b4 = (d: Uint8Array, b: number) => (d[b] | (d[b + 1] << 8) | (d[b + 2] << 16) | (d[b + 3] << 24)) >>> 0;
 
+// read 8 bytes
 const b8 = (d: Uint8Array, b: number) => b4(d, b) + (b4(d, b + 4) * 4294967296);
 
 // write bytes
@@ -2762,18 +2763,30 @@ const slzh = (d: Uint8Array, b: number) => b + 30 + b2(d, b + 26) + b2(d, b + 28
 
 // read zip header
 const zh = (d: Uint8Array, b: number, z: boolean) => {
-  const fnl = b2(d, b + 28), efl = b2(d, b + 30), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl, bs = b4(d, b + 20);
-  const [sc, su, off] = z && bs == 4294967295 ? z64e(d, es, efl) : [bs, b4(d, b + 24), b4(d, b + 42)];
+  const fnl = b2(d, b + 28), efl = b2(d, b + 30), fn = strFromU8(d.subarray(b + 46, b + 46 + fnl), !(b2(d, b + 8) & 2048)), es = b + 46 + fnl;
+  const [sc, su, off] = z64hs(d, es, efl, z, b4(d, b + 20), b4(d, b + 24), b4(d, b + 42));
   return [b2(d, b + 10), sc, su, fn, es + efl + b2(d, b + 32), off] as const;
 }
 
-// read zip64 extra field
-const z64e = (d: Uint8Array, b: number, l: number) => {
-  const e = b + l;
-  for (; b2(d, b) != 1; b += 4 + b2(d, b + 2)) {
-    if (b + 4 > e) err(13);
+// read zip64 header sizes
+const z64hs = (d: Uint8Array, b: number, l: number, z: boolean | number, sc: number, su: number, off: number) => {
+  const nsc = sc == 4294967295, nsu = su == 4294967295, noff = off == 4294967295, e = b + l;
+  const nf = (nsc as unknown as number) + (nsu as unknown as number) + (noff as unknown as number);
+  if (z && nf) {
+    for (; b + 4 < e; b += 4 + b2(d, b + 2)) {
+      if (b2(d, b) == 1) {
+        return [
+          nsc ? b8(d, b + 4 + 8 * (nsu as unknown as number)) : sc,
+          nsu ? b8(d, b + 4) : su,
+          noff ? b8(d, b + 4 + 8 * ((nsu as unknown as number) + (nsc as unknown as number))) : off,
+          1
+        ] as const;
+      }
+    }
+    // z == 2 for unknown whether or not zip64
+    if (z as unknown as number < 2) err(13);
   }
-  return [b8(d, b + 12), b8(d, b + 4), b8(d, b + 20)] as const;
+  return [sc, su, off, 0] as const;
 }
 
 // zip header file
@@ -3638,10 +3651,10 @@ export class Unzip {
             const chks: Uint8Array[] = [];
             this.k.unshift(chks);
             f = 2;
-            let sc = b4(buf, i + 18), su = b4(buf, i + 22);
+            let lsc = b4(buf, i + 18), lsu = b4(buf, i + 22);
             const fn = strFromU8(buf.subarray(i + 30, i += 30 + fnl), !u);
-            if (sc == 4294967295) { [sc, su] = dd ? [-2] : z64e(buf, i, es); }
-            else if (dd) sc = -1;
+            let [sc, su,, z64] = z64hs(buf, i, es, 2, lsc, lsu, 0);
+            if (dd) sc = -1 - z64;
             i += es;
             this.c = sc;
             let d: UnzipDecoder;
@@ -3750,7 +3763,7 @@ export function unzip(data: Uint8Array, opts: AsyncUnzipOptions | UnzipCallback,
   if (lft) {
     let c = lft;
     let o = b4(data, e + 16);
-    let z = o == 4294967295 || c == 65535;
+    let z = b4(data, e - 20) == 0x7064B50;
     if (z) {
       let ze = b4(data, e - 12);
       z = b4(data, ze) == 0x6064B50;
@@ -3813,7 +3826,7 @@ export function unzipSync(data: Uint8Array, opts?: UnzipOptions) {
   let c = b2(data, e + 8);
   if (!c) return {};
   let o = b4(data, e + 16);
-  let z = o == 4294967295 || c == 65535;
+  let z = b4(data, e - 20) == 0x7064B50;
   if (z) {
     let ze = b4(data, e - 12);
     z = b4(data, ze) == 0x6064B50;
