@@ -2556,7 +2556,7 @@ const fltn = <A extends boolean, D = A extends true ? AsyncZippable : Zippable>(
   for (const k in d) {
     let val = d[k], n = p + k, op = o;
     if (Array.isArray(val)) op = mrg(o, val[1]), val = val[0] as unknown as D[Extract<keyof D, string>];
-    if (val instanceof u8) t[n] = [val, op] as unknown as FlatZippable<A>[string];
+    if (ArrayBuffer.isView(val)) t[n] = [val, op] as unknown as FlatZippable<A>[string];
     else {
       t[n += '/'] = [new u8(0), op] as unknown as FlatZippable<A>[string];
       fltn(val as unknown as (A extends true ? AsyncZippable : Zippable), n, t, o);
